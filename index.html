@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organic VR: Crystal & Fluid Network</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; color: white;}
+        #ui {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(5, 5, 10, 0.9); z-index: 100; backdrop-filter: blur(10px);
+        }
+        .upload-btn {
+            position: relative; overflow: hidden; display: inline-block;
+            padding: 15px 30px; background: linear-gradient(45deg, #0088ff, #0044aa);
+            color: white; font-size: 20px; font-weight: bold; border-radius: 50px;
+            cursor: pointer; transition: transform 0.2s; box-shadow: 0 0 20px rgba(0, 136, 255, 0.5);
+            margin: 10px; text-align: center; border: none;
+        }
+        .upload-btn:hover { transform: scale(1.05); }
+        .upload-btn input[type=file] { font-size: 100px; position: absolute; left: 0; top: 0; opacity: 0; cursor: pointer; }
+        
+        #btn-start-no-audio { background: linear-gradient(45deg, #555, #333); box-shadow: 0 0 20px rgba(255, 255, 255, 0.1); }
+        
+        #instructions { margin-top: 30px; text-align: center; line-height: 1.8; color: #ccc; }
+        #hud { position: absolute; top: 10px; width: 100%; text-align: center; pointer-events: none; z-index: 50; display: none; text-shadow: 0 0 5px #000; font-size: 16px; color: #ccc; }
+        #control-panel {
+            position: absolute; left: 20px; top: 20px; width: 340px; bottom: 20px;
+            background: rgba(5, 10, 20, 0.85); border: 1px solid #0088ff; border-radius: 10px;
+            display: none; flex-direction: column; padding: 15px; box-sizing: border-box; z-index: 60;
+        }
+        #control-panel h2 { margin: 0 0 10px 0; font-size: 18px; color: #0088ff; }
+        #search-input { width: 100%; padding: 10px; border: none; border-radius: 5px; background: #fff; color: #000; margin-bottom: 10px; font-weight: bold; outline: none; box-sizing: border-box; }
+        #entity-list { flex-grow: 1; overflow-y: auto; list-style: none; padding: 0; margin: 0; }
+        #entity-list li { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: pointer; display: flex; justify-content: space-between; font-size: 13px; }
+        #entity-list li:hover { background: rgba(0, 136, 255, 0.2); }
+        .selected-item { color: #fff; font-weight: bold; background: rgba(0, 136, 255, 0.4); border-left: 4px solid #0088ff; }
+        .badge { font-size: 11px; background: #333; padding: 2px 6px; border-radius: 10px; white-space: nowrap; margin-left: 5px;}
+        .btn-group { display: flex; gap: 10px; margin-top: 10px; }
+        .btn-panel { flex: 1; padding: 10px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; }
+        #btn-clear { background: #555; }
+        #btn-record { background: #ff4444; }
+        
+        .xr-hidden { display: none !important; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="ui">
+        <h1>Crystal & Fluid Network</h1>
+        <div style="display: flex; gap: 20px;">
+            <div class="upload-btn">
+                <span>MP3로 시작 (오디오 반응)</span>
+                <input type="file" id="audioInput" accept="audio/*">
+            </div>
+            <button id="btn-start-no-audio" class="upload-btn">음악 없이 바로 시작</button>
+        </div>
+        <div id="instructions">
+            <strong>[PC 조작]</strong><br>
+            <strong>우클릭: 파란 수정 ↔ 유체 은하 변환 | 휠 클릭(가운데 버튼): 파편 폭발/복원</strong><br>
+            ESC: UI 숨김 | R: 녹화 | D: 다이코틱 효과<br><br>
+            <strong>[VR 조작]</strong><br>
+            <strong>왼쪽 트리거 유지: 공간을 잡아 회전 | 왼쪽 그립: 다이코틱 필터</strong><br>
+            <strong>오른쪽 트리거: 수정 ↔ 은하 형태 변환 | 오른쪽 그립: 파편 폭발/복원</strong><br>
+            왼쪽 썸스틱: 크기 조절 | 오른쪽 썸스틱: 거리 조절
+        </div>
+    </div>
+
+    <div id="control-panel">
+        <h2>데이터 매핑 (독립 추적 시뮬레이션)</h2>
+        <input type="text" id="search-input" placeholder="감정/단어 검색">
+        <ul id="entity-list"></ul>
+        <div class="btn-group">
+            <button id="btn-clear" class="btn-panel">선택 초기화</button>
+            <button id="btn-record" class="btn-panel">⏺ 녹화 (R)</button>
+        </div>
+    </div>
+
+    <div id="hud">우클릭: 변환 | 휠클릭: 폭발 || VR 왼 트리거: 공간회전 | 오른 그립: 폭발</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls, cameraDolly;
+        let audioCtx, analyser, dataArray;
+        
+        let currentState = 'CRYSTAL'; 
+        let isScattered = false; 
+        let mainGroup; 
+
+        let particleSystem;
+        let pPositions, pVelocities, pColors;
+        let crystalTargets, galaxyParams, randomOffsets; 
+        let entitiesData = [], entityMappings = [];
+        let TOTAL_PARTICLE_COUNT = 0;
+
+        let selectedEntities = new Set();
+        let uiVisible = true;
+        
+        let c0, c1;
+        let isGrabbing = false;
+        let previousControllerQuat = new THREE.Quaternion();
+        
+        let vrToggleBtnPressed = false, vrRecordBtnPressed = false;
+        let vrTriggerRightPressed = false, vrTriggerLeftPressed = false; 
+        let vrGripRightPressed = false, vrGripLeftPressed = false;
+
+        let scaleTarget = 1.0;
+        let zTarget = -3.0; 
+        let isDichoptic = false; 
+        let dichopticFilter;
+
+        let mediaRecorder, recordedChunks = [], isRecording = false;
+        const clock = new THREE.Clock();
+
+        const fluidPalette = [
+            {r: 0.2, g: 1.0, b: 0.2}, 
+            {r: 0.6, g: 0.1, b: 1.0}, 
+            {r: 1.0, g: 0.2, b: 0.6}  
+        ];
+
+        async function bootSequence() {
+            try {
+                const response = await fetch('./entities.json');
+                if(!response.ok) throw new Error("JSON Not Found");
+                entitiesData = await response.json();
+            } catch (error) {
+                entitiesData = [];
+                for(let i=0; i<250; i++) {
+                    entitiesData.push({ name: `Node_${i+1}`, category: i % 2 === 0 ? "TypeA" : "TypeB" });
+                }
+            }
+
+            entitiesData.sort(() => Math.random() - 0.5);
+            let currentIndex = 0;
+            
+            entitiesData.forEach((entity, index) => {
+                const weightOptions = [40, 50, 60, 70, 80, 90, 100];
+                const count = weightOptions[Math.floor(Math.random() * weightOptions.length)];
+                const startIndex = currentIndex;
+                const endIndex = currentIndex + count - 1;
+                entityMappings.push({
+                    id: index, name: entity.name, startIndex, endIndex, count, 
+                    category: entity.category
+                });
+                currentIndex += count;
+            });
+            TOTAL_PARTICLE_COUNT = currentIndex;
+
+            initThreeJS();
+            initUI();
+            animate();
+        }
+
+        bootSequence(); 
+
+        document.getElementById('audioInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                audioCtx.decodeAudioData(e.target.result, function(buffer) {
+                    const source = audioCtx.createBufferSource();
+                    source.buffer = buffer;
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 256;
+                    dataArray = new Uint8Array(analyser.frequencyBinCount);
+                    source.connect(analyser);
+                    analyser.connect(audioCtx.destination);
+                    source.loop = true;
+                    source.start(0);
+                    hideIntroUI();
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        document.getElementById('btn-start-no-audio').addEventListener('click', hideIntroUI);
+
+        function hideIntroUI() {
+            document.getElementById('ui').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('control-panel').style.display = 'flex'; 
+        }
+
+        function initUI() {
+            const searchInput = document.getElementById('search-input');
+            const clearBtn = document.getElementById('btn-clear');
+            const recordBtn = document.getElementById('btn-record');
+            searchInput.addEventListener('input', (e) => renderList(e.target.value));
+            clearBtn.addEventListener('click', () => { selectedEntities.clear(); renderList(searchInput.value); });
+            recordBtn.addEventListener('click', toggleRecording);
+            renderList();
+        }
+
+        function renderList(filter = '') {
+            const list = document.getElementById('entity-list');
+            list.innerHTML = '';
+            const lowerFilter = filter.toLowerCase();
+            const filtered = entityMappings.filter(e => e.name.toLowerCase().includes(lowerFilter)).slice(0, 100);
+            filtered.forEach(entity => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span style="color:#ddd">${entity.name}</span> <span class="badge">${entity.count} 입자</span>`;
+                if (selectedEntities.has(entity.id)) li.classList.add('selected-item');
+                li.addEventListener('click', () => {
+                    selectedEntities.has(entity.id) ? selectedEntities.delete(entity.id) : selectedEntities.add(entity.id);
+                    renderList(filter); 
+                });
+                list.appendChild(li);
+            });
+        }
+
+        function toggleRecording() {
+            const recordBtn = document.getElementById('btn-record');
+            if (isRecording) {
+                if(mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+                isRecording = false;
+                recordBtn.innerText = '⏺ 녹화 (R)';
+                recordBtn.style.background = '#ff4444';
+            } else {
+                try {
+                    recordedChunks = [];
+                    const stream = renderer.domElement.captureStream(30);
+                    let mimeType = 'video/webm;codecs=vp9';
+                    if (MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/mp4';
+
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
+                    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+                    mediaRecorder.onstop = () => {
+                        const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+                        const blob = new Blob(recordedChunks, { type: mimeType });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = `VR_Record.${ext}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+                    };
+                    mediaRecorder.start();
+                    isRecording = true;
+                    recordBtn.innerText = '⏹ 저장 중지';
+                    recordBtn.style.background = '#4488ff';
+                } catch (e) { console.warn("녹화 미지원 브라우저입니다."); }
+            }
+        }
+
+        function toggleScatter() {
+            isScattered = !isScattered;
+            if (isScattered) {
+                for (let i = 0; i < TOTAL_PARTICLE_COUNT; i++) {
+                    let idx = i * 3;
+                    pVelocities[idx] += (Math.random() - 0.5) * 30.0;
+                    pVelocities[idx+1] += (Math.random() - 0.5) * 30.0;
+                    pVelocities[idx+2] += (Math.random() - 0.5) * 30.0;
+                }
+            }
+        }
+
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000); 
+
+            cameraDolly = new THREE.Group();
+            cameraDolly.position.set(0, 0, 0); 
+            scene.add(cameraDolly);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 1.6, 0); 
+            cameraDolly.add(camera);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true; 
+            renderer.xr.setReferenceSpaceType('local'); 
+            document.body.appendChild(renderer.domElement);
+            document.body.appendChild(VRButton.createButton(renderer)); 
+
+            c0 = renderer.xr.getController(0);
+            c0.addEventListener('connected', (e) => { if(e.data) c0.userData.handedness = e.data.handedness; });
+            scene.add(c0);
+
+            c1 = renderer.xr.getController(1);
+            c1.addEventListener('connected', (e) => { if(e.data) c1.userData.handedness = e.data.handedness; });
+            scene.add(c1);
+
+            const filterGeo = new THREE.PlaneGeometry(10, 10); 
+            const filterMat = new THREE.MeshBasicMaterial({
+                color: 0xaa00ff, transparent: true, opacity: 0.25, depthTest: false, depthWrite: false, blending: THREE.NormalBlending 
+            });
+            dichopticFilter = new THREE.Mesh(filterGeo, filterMat);
+            dichopticFilter.position.set(0, 0, -0.1); 
+            camera.add(dichopticFilter); 
+            dichopticFilter.visible = false; 
+
+            renderer.xr.addEventListener('sessionstart', () => {
+                document.getElementById('ui').classList.add('xr-hidden');
+                document.getElementById('control-panel').classList.add('xr-hidden');
+                document.getElementById('hud').classList.add('xr-hidden');
+                controls.enabled = false; 
+            });
+            renderer.xr.addEventListener('sessionend', () => {
+                document.getElementById('ui').classList.remove('xr-hidden');
+                document.getElementById('control-panel').classList.remove('xr-hidden');
+                document.getElementById('hud').classList.remove('xr-hidden');
+                document.getElementById('control-panel').style.display = uiVisible ? 'flex' : 'none';
+                controls.enabled = true; 
+            });
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.target.set(0, 1.5, -3);
+            controls.enableDamping = true;
+
+            mainGroup = new THREE.Group();
+            mainGroup.position.set(0, 1.5, -3.0); 
+            scene.add(mainGroup);
+
+            createParticles(); 
+
+            window.addEventListener('mousedown', (e) => {
+                if (e.button === 2) { 
+                    e.preventDefault(); 
+                    currentState = (currentState === 'CRYSTAL') ? 'GALAXY' : 'CRYSTAL'; 
+                } else if (e.button === 1) { 
+                    e.preventDefault();
+                    toggleScatter();
+                }
+            });
+            window.addEventListener('contextmenu', (e) => e.preventDefault());
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('keydown', (e) => {
+                if (document.activeElement.id === 'search-input' && e.key !== 'Escape') return;
+                const panel = document.getElementById('control-panel');
+                if (e.key === 'Escape') { uiVisible = false; document.activeElement.blur(); } 
+                else if (e.key === 'r' || e.key === 'R') { toggleRecording(); } 
+                else if (e.key === 'd' || e.key === 'D') { isDichoptic = !isDichoptic; } 
+                else { uiVisible = true; }
+                if (!renderer.xr.isPresenting) panel.style.display = uiVisible ? 'flex' : 'none';
+            });
+        }
+
+        function createParticles() {
+            const geo = new THREE.BufferGeometry();
+            pPositions = new Float32Array(TOTAL_PARTICLE_COUNT * 3);
+            pVelocities = new Float32Array(TOTAL_PARTICLE_COUNT * 3);
+            pColors = new Float32Array(TOTAL_PARTICLE_COUNT * 3); 
+            
+            crystalTargets = new Float32Array(TOTAL_PARTICLE_COUNT * 3);
+            galaxyParams = new Float32Array(TOTAL_PARTICLE_COUNT * 3);
+            randomOffsets = new Float32Array(TOTAL_PARTICLE_COUNT);
+
+            for (let i = 0; i < TOTAL_PARTICLE_COUNT; i++) {
+                const idx = i * 3;
+                
+                const h = (Math.random() - 0.5) * 4.0; 
+                let taper = 1.0 - Math.abs(h / 2.0); 
+                if(taper < 0) taper = 0;
+                
+                const angle = Math.floor(Math.random() * 6) * (Math.PI / 3); 
+                const r = (0.7 + Math.random() * 0.3) * taper; 
+                
+                crystalTargets[idx] = r * Math.cos(angle);
+                crystalTargets[idx+1] = h;
+                crystalTargets[idx+2] = r * Math.sin(angle);
+
+                pPositions[idx] = crystalTargets[idx] + (Math.random() - 0.5) * 0.1;
+                pPositions[idx+1] = crystalTargets[idx+1] + (Math.random() - 0.5) * 0.1;
+                pPositions[idx+2] = crystalTargets[idx+2] + (Math.random() - 0.5) * 0.1;
+
+                galaxyParams[idx] = Math.random() * Math.PI * 2; 
+                galaxyParams[idx+1] = Math.floor(Math.random() * 5); 
+                galaxyParams[idx+2] = Math.random() * Math.PI * 2; 
+                
+                randomOffsets[i] = Math.random(); 
+            }
+
+            geo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(pColors, 3)); 
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 16; canvas.height = 16;
+            const ctx = canvas.getContext('2d');
+            ctx.beginPath();
+            ctx.arc(8, 8, 6, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff'; 
+            ctx.fill();
+            
+            // [핵심 수정] THREE.AdditiveBlending에서 일반 투명 혼합 모드인 THREE.NormalBlending으로 변경
+            // 빛 중첩으로 인해 파란색 파티클 전체가 하얗게 타버리는 현상(백화)을 완벽히 차단합니다.
+            const mat = new THREE.PointsMaterial({
+                size: 0.025, 
+                map: new THREE.CanvasTexture(canvas), 
+                transparent: true, opacity: 0.8, 
+                blending: THREE.NormalBlending, 
+                depthWrite: false, vertexColors: true 
+            });
+
+            particleSystem = new THREE.Points(geo, mat);
+            particleSystem.frustumCulled = false; 
+            mainGroup.add(particleSystem); 
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() { renderer.setAnimationLoop(render); }
+
+        function render() {
+            let delta = clock.getDelta();
+            if (delta > 0.02) delta = 0.016; 
+            const time = clock.getElapsedTime();
+
+            if (!renderer.xr.isPresenting && controls.enabled) controls.update();
+
+            try {
+                const session = renderer.xr.getSession();
+                if (session && session.inputSources) {
+                    let cLeft = c0;
+                    if (c0 && c0.userData && c0.userData.handedness === 'left') cLeft = c0;
+                    else if (c1 && c1.userData && c1.userData.handedness === 'left') cLeft = c1;
+
+                    let leftXBPressed = false;
+
+                    for (let i = 0; i < session.inputSources.length; i++) {
+                        const source = session.inputSources[i];
+                        if (!source || !source.gamepad) continue;
+                        
+                        const gamepad = source.gamepad;
+                        const btns = gamepad.buttons || [];
+                        const axes = gamepad.axes || [];
+
+                        const btn4Pressed = btns.length > 4 ? btns[4].pressed : false;
+                        const btn5Pressed = btns.length > 5 ? btns[5].pressed : false;
+                        const triggerValue = btns.length > 0 ? btns[0].value : 0;
+                        const gripValue = btns.length > 1 ? btns[1].value : 0;
+                        const thumbstickY = axes.length > 3 ? axes[3] : (axes.length > 1 ? axes[1] : 0);
+
+                        const handedness = source.handedness || 'none';
+
+                        if (handedness === 'left' || (handedness === 'none' && i === 0)) {
+                            if (btn4Pressed || btn5Pressed) leftXBPressed = true;
+                            if (Math.abs(thumbstickY) > 0.1) scaleTarget -= thumbstickY * 0.03; 
+
+                            if (triggerValue > 0.5) {
+                                if (!isGrabbing) {
+                                    isGrabbing = true;
+                                    if (cLeft) previousControllerQuat.copy(cLeft.quaternion);
+                                } else if (cLeft) {
+                                    const currentQuat = cLeft.quaternion.clone();
+                                    const inversePrev = previousControllerQuat.clone().invert();
+                                    const deltaQuat = currentQuat.multiply(inversePrev);
+                                    
+                                    const pivot = new THREE.Vector3(0, 1.5, -3.0);
+                                    mainGroup.updateMatrixWorld();
+                                    const pivotWorld = pivot.clone().applyMatrix4(mainGroup.matrixWorld);
+                                    
+                                    mainGroup.quaternion.premultiply(deltaQuat);
+                                    mainGroup.updateMatrixWorld();
+                                    
+                                    const newPivotWorld = pivot.clone().applyMatrix4(mainGroup.matrixWorld);
+                                    mainGroup.position.add(pivotWorld).sub(newPivotWorld);
+                                    
+                                    previousControllerQuat.copy(cLeft.quaternion);
+                                }
+                            } else {
+                                isGrabbing = false;
+                            }
+
+                            if (gripValue > 0.5 && !vrGripLeftPressed) { 
+                                isDichoptic = !isDichoptic; vrGripLeftPressed = true; 
+                            } else if (gripValue < 0.1) { vrGripLeftPressed = false; }
+                        }
+
+                        if (handedness === 'right' || (handedness === 'none' && i === 1)) {
+                            if (Math.abs(thumbstickY) > 0.1) zTarget += thumbstickY * 0.1; 
+
+                            if (triggerValue > 0.5 && !vrTriggerRightPressed) { 
+                                currentState = (currentState === 'CRYSTAL') ? 'GALAXY' : 'CRYSTAL'; 
+                                vrTriggerRightPressed = true; 
+                            } else if (triggerValue < 0.1) { vrTriggerRightPressed = false; }
+
+                            if (gripValue > 0.5 && !vrGripRightPressed) {
+                                toggleScatter();
+                                vrGripRightPressed = true;
+                            } else if (gripValue < 0.1) { vrGripRightPressed = false; }
+                        }
+                    }
+
+                    if (leftXBPressed && !vrToggleBtnPressed) { uiVisible = !uiVisible; vrToggleBtnPressed = true; } 
+                    else if (!leftXBPressed) { vrToggleBtnPressed = false; }
+                }
+            } catch (e) {}
+
+            scaleTarget = Math.max(0.2, Math.min(scaleTarget, 10.0)); 
+            zTarget = Math.max(-15.0, Math.min(zTarget, 5.0)); 
+            mainGroup.scale.lerp(new THREE.Vector3(scaleTarget, scaleTarget, scaleTarget), 0.05);
+            mainGroup.position.z += (zTarget - mainGroup.position.z) * 0.05;
+
+            if (isDichoptic && renderer.xr.isPresenting) {
+                try {
+                    const xrCamera = renderer.xr.getCamera(camera);
+                    if (xrCamera && xrCamera.cameras && xrCamera.cameras.length > 0) {
+                        xrCamera.cameras[0].layers.enable(1); 
+                        if(xrCamera.cameras.length > 1) xrCamera.cameras[1].layers.disable(1); 
+                        dichopticFilter.visible = true;
+                    }
+                } catch(e) {}
+            } else {
+                if(dichopticFilter) dichopticFilter.visible = false;
+            }
+
+            let audioIntensity = 0;
+            if (analyser) {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0; for(let i=0; i<30; i++) sum += dataArray[i]; 
+                audioIntensity = sum / (30 * 255);
+            }
+
+            const isCrystal = (currentState === 'CRYSTAL');
+            const hasSelection = selectedEntities.size > 0;
+
+            const colorPhase = time / 2.5; 
+            const colorIdx1 = Math.floor(colorPhase) % 3;
+            const colorIdx2 = (colorIdx1 + 1) % 3;
+            let mix = colorPhase - Math.floor(colorPhase);
+            mix = mix * mix * (3 - 2 * mix); 
+
+            const c1 = fluidPalette[colorIdx1];
+            const c2 = fluidPalette[colorIdx2];
+            const globalR = c1.r * (1 - mix) + c2.r * mix;
+            const globalG = c1.g * (1 - mix) + c2.g * mix;
+            const globalB = c1.b * (1 - mix) + c2.b * mix;
+
+            for (let i = 0; i < entityMappings.length; i++) {
+                const entity = entityMappings[i];
+                const isSelected = selectedEntities.has(entity.id);
+                
+                for (let p = entity.startIndex; p <= entity.endIndex; p++) {
+                    const idx = p * 3;
+                    
+                    let px = pPositions[idx], py = pPositions[idx+1], pz = pPositions[idx+2];
+                    
+                    if (isNaN(px) || isNaN(py) || isNaN(pz) || Math.abs(px) > 100) {
+                        pPositions[idx] = crystalTargets[idx]; pPositions[idx+1] = crystalTargets[idx+1]; pPositions[idx+2] = crystalTargets[idx+2];
+                        pVelocities[idx] = 0; pVelocities[idx+1] = 0; pVelocities[idx+2] = 0;
+                        px = pPositions[idx]; py = pPositions[idx+1]; pz = pPositions[idx+2];
+                    }
+
+                    let tx, ty, tz, tr, tg, tb;
+
+                    if (isCrystal) {
+                        tx = crystalTargets[idx]; ty = crystalTargets[idx+1]; tz = crystalTargets[idx+2];
+                        const rotY = time * 0.3;
+                        let rx = tx * Math.cos(rotY) - tz * Math.sin(rotY);
+                        let rz = tx * Math.sin(rotY) + tz * Math.cos(rotY);
+                        const expand = 1.0 + (audioIntensity * 0.2);
+                        tx = rx * expand; ty = ty * expand; tz = rz * expand;
+
+                        const intensity = 0.6 + randomOffsets[p] * 0.2 + (audioIntensity * 0.3);
+                        tr = 0.1 * intensity; tg = 0.4 * intensity; tb = 1.0 * intensity; 
+                    } else {
+                        const u = galaxyParams[idx] + time * 0.4; 
+                        const strand = galaxyParams[idx+1]; 
+                        let mx = Math.sin(u) + 2 * Math.sin(2 * u);
+                        let my = Math.cos(u) - 2 * Math.cos(2 * u);
+                        let mz = -Math.sin(3 * u);
+
+                        const strandAngle = (strand / 5) * Math.PI * 2 + time * 0.5;
+                        mx += Math.cos(strandAngle) * 0.5; my += Math.sin(strandAngle) * 0.5;
+
+                        const tubeAngle = galaxyParams[idx+2] * Math.PI * 2 + time;
+                        const tubeRadius = randomOffsets[p] * 0.3;
+                        mx += Math.cos(tubeAngle) * tubeRadius; my += Math.sin(tubeAngle) * tubeRadius; mz += Math.cos(tubeAngle * 1.5) * tubeRadius;
+
+                        const rotX = time * 0.15, rotY = time * 0.2;
+                        let rx = mx * Math.cos(rotX) - mz * Math.sin(rotX);
+                        let rz = mx * Math.sin(rotX) + mz * Math.cos(rotX);
+                        tx = rx * Math.cos(rotY) - rz * Math.sin(rotY);
+                        ty = my;
+                        tz = rx * Math.sin(rotY) + rz * Math.cos(rotY);
+
+                        const expand = 0.6 + (audioIntensity * 0.15);
+                        tx *= expand; ty *= expand; tz *= expand;
+
+                        tr = globalR; tg = globalG; tb = globalB;
+                    }
+
+                    if (hasSelection) {
+                        if (isSelected) {
+                            tr = 1.0; tg = 1.0; tb = 1.0; 
+                            const orbitRadius = 3.5;
+                            const orbitSpeed = time * 2.0 + randomOffsets[p] * Math.PI * 2;
+                            tx = Math.cos(orbitSpeed) * orbitRadius;
+                            ty = Math.sin(time * 3.0 + randomOffsets[p] * 5.0) * 1.5; 
+                            tz = Math.sin(orbitSpeed) * orbitRadius;
+                        } else {
+                            tr *= 0.7; tg *= 0.7; tb *= 0.7; 
+                        }
+                    }
+
+                    if (isScattered) {
+                        let tFac = time * 0.6;
+                        let windX = Math.cos(tFac + py * 2.0) * 0.5 + Math.sin(tFac * 0.5 + pz);
+                        let windY = Math.sin(tFac + px * 2.0) * 0.5 + Math.cos(tFac * 0.7 + pz);
+                        let windZ = Math.sin(tFac + px * 1.5) * 0.5 + Math.cos(tFac * 0.3 + py);
+
+                        pVelocities[idx] += windX * delta * 15.0;
+                        pVelocities[idx+1] += windY * delta * 15.0;
+                        pVelocities[idx+2] += windZ * delta * 15.0;
+
+                        pVelocities[idx] -= px * delta * 0.5;
+                        pVelocities[idx+1] -= (py - 1.5) * delta * 0.5;
+                        pVelocities[idx+2] -= pz * delta * 0.5;
+
+                        if (audioIntensity > 0.6) {
+                            pVelocities[idx] += (Math.random() - 0.5) * 3.0;
+                            pVelocities[idx+1] += (Math.random() - 0.5) * 3.0;
+                            pVelocities[idx+2] += (Math.random() - 0.5) * 3.0;
+                        }
+
+                        pPositions[idx] += pVelocities[idx] * delta;
+                        pPositions[idx+1] += pVelocities[idx+1] * delta;
+                        pPositions[idx+2] += pVelocities[idx+2] * delta;
+
+                        pVelocities[idx] *= 0.96; pVelocities[idx+1] *= 0.96; pVelocities[idx+2] *= 0.96;
+
+                    } else {
+                        if (!isCrystal) {
+                            let flowX = Math.sin(py * 2.0 + time) * Math.cos(pz * 2.0 + time * 0.8);
+                            let flowY = Math.sin(pz * 2.0 + time) * Math.cos(px * 2.0 + time * 0.8);
+                            let flowZ = Math.sin(px * 2.0 + time) * Math.cos(py * 2.0 + time * 0.8);
+                            
+                            pVelocities[idx] += flowX * delta * 5.0;
+                            pVelocities[idx+1] += flowY * delta * 5.0;
+                            pVelocities[idx+2] += flowZ * delta * 5.0;
+                        }
+
+                        const pullStrength = isCrystal ? 6.0 : 3.0; 
+                        pVelocities[idx] += (tx - px) * delta * pullStrength;
+                        pVelocities[idx+1] += (ty - py) * delta * pullStrength;
+                        pVelocities[idx+2] += (tz - pz) * delta * pullStrength;
+
+                        pPositions[idx] += pVelocities[idx] * delta;
+                        pPositions[idx+1] += pVelocities[idx+1] * delta;
+                        pPositions[idx+2] += pVelocities[idx+2] * delta;
+                        
+                        const friction = isCrystal ? 0.8 : 0.9;
+                        pVelocities[idx] *= friction;
+                        pVelocities[idx+1] *= friction;
+                        pVelocities[idx+2] *= friction;
+                    }
+
+                    pColors[idx] = tr; pColors[idx+1] = tg; pColors[idx+2] = tb;
+                }
+            }
+
+            particleSystem.geometry.attributes.color.needsUpdate = true;
+            particleSystem.geometry.attributes.position.needsUpdate = true;
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
